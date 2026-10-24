@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+server/dataset/
+server/dataset_split/
+server/runs/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.pt
+!server/models/.gitkeep
+server/sounds/
+server/highscores.json
