@@ -87,7 +87,7 @@ Tips: use your **phone's hotspot** (venue Wi-Fi often blocks device-to-device tr
 
 1. Install the latest GPU driver from Windows Update / your OEM, and the **“OpenCL, OpenGL & Vulkan Compatibility Pack”** from the Microsoft Store — Windows-on-ARM needs it for OpenGL.
 2. Check `python -c "import platform; print(platform.machine())"`. `AMD64` = x64 Python running under emulation (works, ~30% slower). Native `ARM64` Python may not have Panda3D wheels yet.
-3. Still under 50 fps? `python main.py --res 960x540`, then `--renderer dx9`. The game also shrinks its own window automatically if the first 10 s run slow.
+3. Fullscreen on a high-res laptop panel renders MORE pixels and can cost fps; use `--fullscreen --res 1600x900` or stay windowed. Still under 50 fps? `python main.py --res 960x540`, then `--renderer dx9`. The game also shrinks its own window automatically if the first 10 s run slow.
 4. Gyro lag is mostly frame rate + Wi-Fi. The phone app now disables Nagle, holds a low-latency Wi-Fi lock, samples the gyro at 200 Hz and sends at 125 Hz; the PC disables Nagle too.
 
 ## 🔊 Sound & performance
@@ -138,6 +138,7 @@ python tools/test_client.py 127.0.0.1 10      # fake phone: input rate, state ra
 | `X` | Toggle auto-run (off by default) |
 | `B` | Toggle detection boxes |
 | `F9` | Record auto-labelled YOLO dataset |
+| `F11` | Fullscreen on/off (borderless; also `python main.py --fullscreen`) |
 | `Esc` | Quit |
 
 ## 👁 YOLO — read this
