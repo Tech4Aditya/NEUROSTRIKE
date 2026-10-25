@@ -134,11 +134,49 @@ def ambience():
     return _norm(wind + hiss, 0.5)           # FFT-filtered noise is periodic -> loops seamlessly
 
 
+def plate_pickup():
+    t = _t(0.30)
+    sweep = np.sin(2 * np.pi * (800 + 2600 * t / 0.30) * t) * np.exp(-t * 9) * 0.5
+    return _norm(_mix(sweep, _tick(3200, 0.05, 0.7)), 0.7)
+
+
+def plate_apply():
+    """velcro rip -> plate scrapes in -> clack -> lock thump -> shimmer (about 1.8 s)."""
+    x = np.zeros(int(SR * 1.9))
+    t = _t(0.45)
+    rip = _hp(_noise(len(t), 70), 1400) * (np.sin(2 * np.pi * 85 * t) > -0.2) * np.exp(-t * 3.0) * 0.55
+    _place(x, rip, 0.08)
+    t = _t(0.40)
+    _place(x, _lp(_noise(len(t), 71), 2600) * np.sin(np.pi * t / 0.40) * 0.25, 0.60)
+    _place(x, _mix(_tick(1500, 0.06), _thunk(210, 0.12, 0.8)), 0.98)
+    _place(x, _mix(_thunk(80, 0.28, 1.2), _tick(2600, 0.05)), 1.38)
+    t = _t(0.55)
+    shimmer = sum(np.sin(2 * np.pi * f * t) for f in (1800, 2400, 3000)) * np.exp(-t * 7) * 0.12
+    _place(x, shimmer, 1.40)
+    return _norm(x, 0.85)
+
+
+def armor_hit():
+    t = _t(0.25)
+    ping = np.sin(2 * np.pi * 2200 * t) * np.exp(-t * 38) * 0.6
+    crunch = _hp(_noise(len(t), 72), 2500) * np.exp(-t * 110) * 0.7
+    return _norm(ping + crunch + _lp(_noise(len(t), 73), 400) * np.exp(-t * 30) * 0.6, 0.85)
+
+
+def armor_break():
+    t = _t(0.55)
+    rng = np.random.default_rng(74)
+    crunch = _lp(_noise(len(t), 75), 3500) * np.exp(-t * 9) * (rng.random(len(t)) > 0.35)
+    thump = np.sin(2 * np.pi * 90 * t) * np.exp(-t * 14)
+    return _norm(_mix(0.8 * crunch + thump, _tick(2000, 0.05)), 0.95)
+
+
 BUILD = {"shot": gunshot, "reload": reload_full, "reload_tac": reload_tac, "click": click, "hit": hit,
          "kill": kill, "hurt": hurt, "step": step, "enemy_steps": enemy_steps, "whoosh": whoosh,
-         "ambience": ambience}
+         "ambience": ambience, "plate_pickup": plate_pickup, "plate_apply": plate_apply,
+         "armor_hit": armor_hit, "armor_break": armor_break}
 POOL = {"shot": 4, "reload": 1, "reload_tac": 1, "click": 2, "hit": 3, "kill": 2, "hurt": 2,
-        "step": 3, "whoosh": 1, "ambience": 1}
+        "step": 3, "whoosh": 1, "ambience": 1, "plate_pickup": 2, "plate_apply": 1, "armor_hit": 3, "armor_break": 1}
 
 
 def _write(path, x):

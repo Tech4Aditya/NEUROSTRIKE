@@ -60,7 +60,7 @@ FULLSCREEN = False                # True = start fullscreen (or press F11 in gam
 # --- exhibition -------------------------------------------------------------
 VSYNC = False                     # False = no vsync (avoids the 60->30 fps quantisation on slow GPUs)
 ATTRACT = True                    # idle screen: AI bot plays by itself until someone picks up the phone
-ROUND_TIME = 90                   # seconds per visitor round
+ROUND_TIME = 200                   # seconds per visitor round
 RESULTS_TIME = 10                 # seconds the results screen stays up
 SHOW_AI_VIEW = True               # picture-in-picture of what YOLO sees (V toggles)
 
@@ -79,3 +79,12 @@ def apply_quality(name):
 
 
 apply_quality(QUALITY)
+
+# --- armor plates (Warzone style) -------------------------------------------
+PLATE_ARMOR = 10                  # armor points one plate adds (armor only, never health)
+PLATE_MAX = 30                    # armor cap (3 plates)
+PLATE_TIME = 1.8                  # seconds the apply animation takes
+PLATES_ON_MAP = 1                 # plates lying around at once
+PLATE_SPAWN_INTERVAL = 14.0       # seconds between spawns
+PLATE_DROP_CHANCE = 0.0          # chance a killed enemy drops a plate
+PLATE_PICKUP_RADIUS = 1.3

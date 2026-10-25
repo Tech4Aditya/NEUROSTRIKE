@@ -200,3 +200,16 @@ def drum():
         lum = ribs * (0.85 + 0.30 * (_fractal(n, 2.2, 61) - 0.5))
         _cache["drum"] = _tex("drum", np.repeat(lum[..., None], 3, axis=2))
     return _cache["drum"]
+
+
+def beam():
+    """Vertical light column: soft edges, fades towards the top (additive blend, billboarded)."""
+    if "beam" not in _cache:
+        w, h = 32, 128
+        u = np.linspace(-1, 1, w)[None, :]
+        v = np.linspace(1, 0, h)[:, None]                 # row 0 = top
+        a = np.exp(-u ** 2 * 3.0) * (1 - v) ** 1.1 * 0.95
+        rgba = np.zeros((h, w, 4)); rgba[..., 0], rgba[..., 1], rgba[..., 2] = 0.30, 0.85, 1.0
+        rgba[..., 3] = a
+        _cache["beam"] = _tex_rgba("beam", rgba, clamp=True)
+    return _cache["beam"]

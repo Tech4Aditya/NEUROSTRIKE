@@ -137,6 +137,28 @@ class Weapon:
                                                    ColorBlendAttrib.OOne))
         self.flash.hide()
 
+        # armor-plate animation: both gloved hands carry a plate up, hold it, then push it down into the vest
+        STEEL = (0.30, 0.33, 0.37, 1)
+        self.pnode = self.scene.attachNewNode("plate_anim")
+        P(self.pnode, (0, 0, 0), (0.12, 0.012, 0.15), STEEL)
+        P(self.pnode, (0, -0.012, 0), (0.09, 0.006, 0.12), (0.47, 0.51, 0.56, 1))
+        P(self.pnode, (0, -0.016, 0.0), (0.02, 0.003, 0.12), (0.30, 0.34, 0.38, 1))
+        for s_ in (-1, 1):
+            P(self.pnode, (s_ * 0.135, 0, 0), (0.032, 0.022, 0.055), GLOVE)
+            for k in (-0.03, 0.0, 0.03):
+                P(self.pnode, (s_ * 0.10, -0.016, k), (0.03, 0.007, 0.009), GLOVE)
+            fa = self.pnode.attachNewNode("fa"); fa.setPos(s_ * 0.14, 0, -0.04)
+            fa.lookAt(Point3(s_ * 0.34, -0.55, -0.45))
+            P(fa, (0, 0.25, 0), (0.034, 0.25, 0.034), SLEEVE)
+        self.pnode.flattenStrong(); self.pnode.hide()
+        self.pflash = self.scene.attachNewNode("plate_flash")
+        cm = CardMaker("pf"); cm.setFrame(-0.30, 0.30, -0.30, 0.30)
+        self.pflash.attachNewNode(cm.generate())
+        self.pflash.setTexture(T.blob()); self.pflash.setLightOff(); self.pflash.setTwoSided(True)
+        self.pflash.setTransparency(TransparencyAttrib.MAlpha); self.pflash.setDepthWrite(False)
+        self.pflash.setAttrib(ColorBlendAttrib.make(ColorBlendAttrib.MAdd, ColorBlendAttrib.OIncomingAlpha, ColorBlendAttrib.OOne))
+        self.pflash.hide()
+
     # -------------------------------------------------------------- animation
     @staticmethod
     def _keys(empty):
@@ -148,6 +170,26 @@ class Weapon:
         return k + [(1.00, HAND_HG, 0.0)]
 
     MODES = "gghxhggg"      # per key-segment: g = mag in gun, h = mag in hand, x = mag hidden (in the pouch)
+
+    def _plate(self, p):
+        if p < 0.30:                                       # hands bring the plate up
+            u = sstep(p / 0.30); x, y, z, s = 0.0, 0.48, lerp(-0.45, -0.13, u), 0.72
+        elif p < 0.62:                                     # inspect / seat it, slight rattle
+            x, y, z, s = 0.004 * math.sin(p * 90), 0.48, -0.13 + 0.004 * math.sin(p * 70), 0.72
+        elif p < 0.82:                                     # push it down into the vest
+            u = sstep((p - 0.62) / 0.20); x, y, z, s = 0.0, lerp(0.48, 0.40, u), lerp(-0.13, -0.33, u), 0.72 - 0.16 * u
+        else:
+            self.pnode.hide()
+            x = None
+        if x is not None:
+            self.pnode.show(); self.pnode.setPos(x, y, z); self.pnode.setScale(s)
+            self.pnode.setHpr(0, -12 * sstep((p - 0.62) / 0.20) if p > 0.62 else 0, 0)
+        if p > 0.78:                                       # cyan lock-in flash
+            u = (p - 0.78) / 0.22
+            self.pflash.show(); self.pflash.setPos(0, 0.34, -0.30); self.pflash.setScale(0.6 + 1.2 * u)
+            self.pflash.setColorScale(0.3, 0.9, 1.0, max(0.0, 1 - u) * 1.4)
+        else:
+            self.pflash.hide()
 
     def fire(self):
         self.bolt_off = 1.0
@@ -170,9 +212,18 @@ class Weapon:
         by = 0.55 - c["kick"] * 0.045
         bz = -0.155 + self.lag[1] + 0.0016 * math.sin(self.t * 1.7) + 0.4 * c["bob"] + c["kick"] * 0.008
         shake = 2.5 * math.sin(p * 90) * dip if c["reloading"] else 0.0
-        self.rig.setPosHpr(lerp(bx, 0.04, sb) - 0.02 * dip, lerp(by, 0.50, sb) - 0.02 * dip,
-                           lerp(bz, -0.22, sb) - 0.03 * dip,
-                           32.0 * sb, c["kick"] * 3.0 - 12.0 * sb - 6.0 * dip, -24.0 * sb + 14.0 * dip + shake)
+        pos = [lerp(bx, 0.04, sb) - 0.02 * dip, lerp(by, 0.50, sb) - 0.02 * dip, lerp(bz, -0.22, sb) - 0.03 * dip]
+        hpr = [32.0 * sb, c["kick"] * 3.0 - 12.0 * sb - 6.0 * dip, -24.0 * sb + 14.0 * dip + shake]
+        pp = c.get("plate", -1.0)
+        if pp >= 0:                                         # plating: rifle drops away while both hands work
+            pb = sstep(pp / 0.14) * (1 - sstep((pp - 0.88) / 0.12))
+            pos = [lerp(pos[0], 0.16, pb), lerp(pos[1], 0.46, pb), lerp(pos[2], -0.38, pb)]
+            hpr = [lerp(hpr[0], 18.0, pb), lerp(hpr[1], -24.0, pb), lerp(hpr[2], -36.0, pb)]
+            self.lhand.hide(); self.lfore.hide()
+            self._plate(pp)
+        else:
+            self.lhand.show(); self.lfore.show(); self.pnode.hide(); self.pflash.hide()
+        self.rig.setPosHpr(*pos, *hpr)
 
         # left hand + magazine
         hand, moff, mode = HAND_HG, 0.0, "g"

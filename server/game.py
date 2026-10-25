@@ -9,12 +9,13 @@ import cv2
 import numpy as np
 from direct.gui.OnscreenText import OnscreenText
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import (AmbientLight, AntialiasAttrib, BitMask32, CardMaker, ClockObject,
+from panda3d.core import (AmbientLight, AntialiasAttrib, BitMask32, CardMaker, ClockObject, ColorBlendAttrib,
                           CullFaceAttrib, DirectionalLight, Fog, LineSegs, PerspectiveLens, Point2,
                           Point3, TextNode, TransparencyAttrib, Vec3, Vec4, WindowProperties,
                           loadPrcFileData)
 
 import config as C
+import textures as T
 from audio import Sfx
 from shadows import make_blob
 from show import Show
@@ -128,6 +129,39 @@ class Enemy:
         self.root.removeNode()
 
 
+class Plate:
+    """Armor plate lying on the map: slowly spinning steel plate, ground ring and a light beam
+    (additive, billboarded) so it can be spotted from across the arena."""
+
+    def __init__(self, game, x, y):
+        self.x, self.y, self.t = x, y, random.random() * 6.28
+        self.root = game.render.attachNewNode("armor_plate"); self.root.setPos(x, y, 0)
+        self.spin = self.root.attachNewNode("spin")
+        for pos, dims, col in (((0, 0, 0), (0.15, 0.022, 0.19), (0.30, 0.33, 0.37, 1)),
+                               ((0, -0.022, 0), (0.11, 0.008, 0.15), (0.47, 0.51, 0.56, 1))):
+            b = make_box(*dims); b.reparentTo(self.spin); b.setPos(*pos); b.setColor(*col)
+        self.spin.flattenStrong()
+        additive = ColorBlendAttrib.make(ColorBlendAttrib.MAdd, ColorBlendAttrib.OIncomingAlpha, ColorBlendAttrib.OOne)
+        cm = CardMaker("ring"); cm.setFrame(-0.9, 0.9, -0.9, 0.9)
+        ring = self.root.attachNewNode(cm.generate())
+        ring.setP(-90); ring.setZ(0.05); ring.setTexture(T.blob()); ring.setColorScale(0.3, 0.9, 1.0, 1.6)
+        cm = CardMaker("beam"); cm.setFrame(-0.6, 0.6, 0, 4.2)
+        self.beam = self.root.attachNewNode(cm.generate())
+        self.beam.setTexture(T.beam()); self.beam.setBillboardAxis()
+        for n in (ring, self.beam):
+            n.setLightOff(); n.setFogOff(); n.setTwoSided(True); n.setDepthWrite(False)
+            n.setTransparency(TransparencyAttrib.MAlpha); n.setAttrib(additive); n.setBin("transparent", 7)
+
+    def update(self, dt):
+        self.t += dt
+        self.spin.setH(self.spin.getH() + 110 * dt)
+        self.spin.setZ(0.85 + 0.07 * math.sin(self.t * 2.2))
+        self.beam.setColorScale(1, 1, 1, 0.75 + 0.25 * math.sin(self.t * 3.0))
+
+    def destroy(self):
+        self.root.removeNode()
+
+
 class NeuroStrike(ShowBase):
     def __init__(self, detector_mode="auto"):
         super().__init__()
@@ -157,6 +191,8 @@ class NeuroStrike(ShowBase):
         self.sprint_key, self.last_shift, self.kb_reload, self.kb_tac, self.step_t = False, -9.0, False, False, 0.0
         self.cap_pending, self.cap_meta, self.q_stage, self.q_t, self.hud_acc = False, None, 0, 0.0, 1.0
         self.godmode, self.spawn_enabled = False, True
+        self.armor, self.armor_flash, self.plates = 0.0, 0.0, []
+        self.plating, self.plating_t, self.plate_spawn_t = False, 0.0, 4.0
         self.since_shot, self.recoil_acc, self.kick = 9.0, 0.0, 0.0
 
         self.setup_scene()
@@ -241,7 +277,14 @@ class NeuroStrike(ShowBase):
         self.t_stats = self.txt("", (0.05, -0.19), tl, 0.05, (1, 1, 1, 1))
         self.hp_bg = self.card(tl, 0.05, -0.27, 0.55, 0.028, (0.1, 0.12, 0.2, 0.9))
         self.hp_fg = self.card(tl, 0.05, -0.27, 0.55, 0.028, (0.2, 1.0, 0.5, 1))
-        self.t_link = self.txt("", (0.05, -0.33), tl, 0.04, ACCENT)
+        self.arm_fg = []
+        seg = (0.55 - 2 * 0.015) / 3
+        for i in range(3):                                  # three plate segments, like Warzone
+            x = 0.05 + i * (seg + 0.015)
+            self.card(tl, x, -0.325, seg, 0.020, (0.10, 0.12, 0.20, 0.9))
+            fg = self.card(tl, x, -0.325, seg, 0.020, (0.30, 0.85, 1.0, 1))
+            self.arm_fg.append((fg, seg))
+        self.t_link = self.txt("", (0.05, -0.41), tl, 0.04, ACCENT)
         br = self.a2dBottomRight
         self.t_ammo = self.txt("", (-0.08, 0.14), br, 0.12, HUD, TextNode.ARight)
         self.t_ammo2 = self.txt("", (-0.08, 0.07), br, 0.04, ACCENT, TextNode.ARight)
@@ -349,7 +392,7 @@ class NeuroStrike(ShowBase):
             self.h -= dyaw
             self.p = max(-80.0, min(80.0, self.p + dpitch))
             self.update_sprint(dt, jx, jy, mag, fire, tac_req)
-            self.update_reload(dt, rel_req)
+            self.update_reload(dt, rel_req and not self.plating)
             self.move_player(dt, jx, jy, mag)
         else:
             self.dead_t -= dt
@@ -374,7 +417,7 @@ class NeuroStrike(ShowBase):
         self.weapon.update(dt, dict(
             dyaw=dyaw, dpitch=dpitch, bob=bob, kick=self.kick, sprint=self.sprint_blend, moving=self.moving,
             reloading=self.reloading, rp=self.reload_t / self.reload_len if self.reloading else 0.0,
-            empty=self.reload_empty))
+            empty=self.reload_empty, plate=(self.plating_t / C.PLATE_TIME) if self.plating else -1.0))
         if self.hit_t > 0:
             self.hit_t -= dt
             if self.hit_t <= 0:
@@ -385,7 +428,7 @@ class NeuroStrike(ShowBase):
             self.p -= rec; self.recoil_acc -= rec
 
         self.fire_cd -= dt
-        if self.alive and fire and self.fire_cd <= 0 and not self.reloading and self.sprint == 0:
+        if self.alive and fire and self.fire_cd <= 0 and not self.reloading and not self.plating and self.sprint == 0:
             if self.mag > 0:
                 self.fire_cd = C.FIRE_COOLDOWN
                 self.mag -= 1
@@ -396,6 +439,7 @@ class NeuroStrike(ShowBase):
                 self.start_reload()                      # auto-reload on empty
 
         self.update_enemies(dt, now)
+        self.update_plates(dt)
         self.update_fx(dt)
         self.vision_tick(dt)
         self.publish(dt)
@@ -489,6 +533,55 @@ class NeuroStrike(ShowBase):
             wp = WindowProperties(); wp.setSize(w, h); self.win.requestProperties(wp)
             print(f"[gfx] {fps:.0f} fps -> window {w}x{h}  (also try: python main.py --renderer dx9)")
 
+    def take_damage(self, dmg):
+        """Armor soaks damage first; only the overflow reaches health."""
+        self.hurt_count += 1
+        if self.armor > 0:
+            soak = min(self.armor, dmg)
+            self.armor -= soak; dmg -= soak
+            self.armor_flash = 0.5
+            self.sfx.play("armor_break" if self.armor <= 0 else "armor_hit", 0.9)
+        if dmg > 0:
+            self.hp -= dmg; self.dmg_flash = 0.5
+            self.sfx.play("hurt", 1.0)
+
+    def spawn_plate(self, dmin=10, dmax=30):
+        for _ in range(30):
+            a, d = random.uniform(0, 6.2832), random.uniform(dmin, dmax)
+            x, y = self.px + math.cos(a) * d, self.py + math.sin(a) * d
+            if abs(x) > C.ARENA_HALF - 3 or abs(y) > C.ARENA_HALF - 3 or (x, y) != push_out(x, y, 0.9):
+                continue
+            self.plates.append(Plate(self, x, y))
+            return True
+        return False
+
+    def update_plates(self, dt):
+        for p in self.plates:
+            p.update(dt)
+        if self.alive and self.spawn_enabled:
+            self.plate_spawn_t -= dt
+            if self.plate_spawn_t <= 0:
+                self.plate_spawn_t = C.PLATE_SPAWN_INTERVAL
+                if len(self.plates) < C.PLATES_ON_MAP:
+                    self.spawn_plate()
+            if not self.plating and self.armor < C.PLATE_MAX:      # walk over a plate -> it applies itself
+                for p in self.plates:
+                    if math.hypot(p.x - self.px, p.y - self.py) < C.PLATE_PICKUP_RADIUS:
+                        p.destroy(); self.plates.remove(p)
+                        self.plating, self.plating_t = True, 0.0
+                        self.reloading = False
+                        self.sfx.play("plate_pickup", 0.8); self.sfx.play("plate_apply", 0.9)
+                        break
+        if self.plating:
+            if not self.alive:
+                self.plating = False
+                return
+            self.plating_t += dt
+            if self.plating_t >= C.PLATE_TIME:
+                self.plating = False
+                self.armor = min(C.PLATE_MAX, self.armor + C.PLATE_ARMOR)
+                self.show.popup(f"+{C.PLATE_ARMOR} ARMOR", 1.2)
+
     def los(self, e):
         """True if nothing solid blocks the line from the camera to the enemy's chest."""
         o = self.camera.getPos(self.render)
@@ -515,6 +608,11 @@ class NeuroStrike(ShowBase):
         self.px = self.py = 0.0; self.hp = 100.0; self.score = 0; self.alive = True
         self.mag, self.reloading, self.sprint, self.tac_cd = C.MAG_SIZE, False, 0, 0.0
         self.t_center.setText("")
+        self.armor, self.plating, self.plate_spawn_t = 0.0, False, C.PLATE_SPAWN_INTERVAL
+        for p in self.plates: p.destroy()
+        self.plates.clear()
+        for _ in range(2):                                  # two plates up front so players see the mechanic
+            self.spawn_plate(7, 14)
 
     # ---------------------------------------------------------------- combat
     def shoot(self):
@@ -560,6 +658,8 @@ class NeuroStrike(ShowBase):
                 self.burst(Point3(hit.x, hit.y, 1.0), 12, (0.80, 0.76, 0.66, 1))
                 hit.destroy(); self.enemies.remove(hit)
                 self.score += 150 if head else 100
+                if random.random() < C.PLATE_DROP_CHANCE and len(self.plates) < C.PLATES_ON_MAP + 2:
+                    self.plates.append(Plate(self, *push_out(hit.x, hit.y, 0.6)))
                 self.show.on_kill(head)
 
     def burst(self, pos, n, color):
@@ -595,8 +695,8 @@ class NeuroStrike(ShowBase):
             d = e.update(dt, self.px, self.py, now)
             self.enemy_audio(e, d)
             if self.alive and not self.godmode and d < 1.5 and self.hurt_cd <= 0:
-                self.hurt_cd = 0.8; self.hp -= 12; self.hurt_count += 1; self.dmg_flash = 0.5
-                self.sfx.play("hurt", 1.0)
+                self.hurt_cd = 0.8
+                self.take_damage(12)
                 if self.hp <= 0:
                     self.hp, self.alive, self.dead_t = 0, False, 3.0
         for i, a in enumerate(self.enemies):  # keep enemies from stacking
@@ -737,7 +837,7 @@ class NeuroStrike(ShowBase):
         res = self.vision.latest()
         self.link.publish({
             "t": "state", "px": round(self.px, 2), "py": round(self.py, 2), "h": round(self.h, 1),
-            "hp": int(self.hp), "score": self.score, "hurt": self.hurt_count, "alive": self.alive,
+            "hp": int(self.hp), "armor": int(self.armor), "score": self.score, "hurt": self.hurt_count, "alive": self.alive,
             "ammo": self.mag, "mag": C.MAG_SIZE, "spr": self.sprint, "stam": round(self.stamina(), 2),
             "rel": round(self.reload_t / self.reload_len, 2) if self.reloading else -1,
             "src": self.vision.name, "ms": int(res["ms"]) if res else 0,
@@ -748,7 +848,13 @@ class NeuroStrike(ShowBase):
 
     def update_hud(self, dt):
         self.dmg_flash = max(0.0, self.dmg_flash - dt)
-        self.dmg_card.setColor(1, 0, 0, self.dmg_flash * 0.5)
+        self.armor_flash = max(0.0, self.armor_flash - dt)
+        if self.armor_flash > 0 and self.dmg_flash <= 0:
+            self.dmg_card.setColor(0.2, 0.7, 1.0, self.armor_flash * 0.35)
+        else:
+            self.dmg_card.setColor(1, 0, 0, self.dmg_flash * 0.5)
+        for i, (fg, seg) in enumerate(self.arm_fg):
+            fg.setScale(seg * max(0.0, min(1.0, (self.armor - i * C.PLATE_ARMOR) / C.PLATE_ARMOR)), 1, 0.020)
         frac = max(0.0, self.hp / 100.0)
         self.hp_fg.setScale(0.55 * frac, 1, 0.028)
         self.hp_fg.setColor(1 - frac, 0.3 + 0.7 * frac, 0.4 * frac, 1)

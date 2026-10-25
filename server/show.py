@@ -256,7 +256,10 @@ class Show:
         else:
             self.react = 0.35
             self.wp_t -= dt
-            if self.wp is None or self.wp_t <= 0 or math.hypot(self.wp[0] - g.px, self.wp[1] - g.py) < 3.0:
+            if g.plates and g.armor < C.PLATE_MAX:         # grab armor plates when nothing to shoot
+                pl = min(g.plates, key=lambda p: math.hypot(p.x - g.px, p.y - g.py))
+                self.wp = (pl.x, pl.y)
+            elif self.wp is None or self.wp_t <= 0 or math.hypot(self.wp[0] - g.px, self.wp[1] - g.py) < 3.0:
                 self.wp = (random.uniform(-26, 26), random.uniform(-26, 26)); self.wp_t = 7.0
             hd = math.degrees(math.atan2(-(self.wp[0] - g.px), self.wp[1] - g.py))
             err = (hd - g.h + 180.0) % 360.0 - 180.0
@@ -292,7 +295,16 @@ class Show:
                 x, z = x * R * 0.95 / d, z * R * 0.95 / d
             s = 0.012
             ls2.moveTo(x - s, 0, z); ls2.drawTo(x, 0, z + s); ls2.drawTo(x + s, 0, z); ls2.drawTo(x, 0, z - s); ls2.drawTo(x - s, 0, z)
+        ls4 = LineSegs(); ls4.setThickness(3); ls4.setColor(0.3, 0.85, 1.0, 1)          # armor plates
+        for p in g.plates:
+            dx, dy = p.x - g.px, p.y - g.py
+            x, z = (dx * ch + dy * sh) * R / ARENA_R, (-dx * sh + dy * ch) * R / ARENA_R
+            d = math.hypot(x, z)
+            if d > R * 0.95:
+                x, z = x * R * 0.95 / d, z * R * 0.95 / d
+            s = 0.010
+            ls4.moveTo(x - s, 0, z - s); ls4.drawTo(x + s, 0, z - s); ls4.drawTo(x + s, 0, z + s); ls4.drawTo(x - s, 0, z + s); ls4.drawTo(x - s, 0, z - s)
         ls3 = LineSegs(); ls3.setThickness(2.5); ls3.setColor(1, 1, 1, 1)
         ls3.moveTo(0, 0, 0.018); ls3.drawTo(-0.011, 0, -0.01); ls3.drawTo(0.011, 0, -0.01); ls3.drawTo(0, 0, 0.018)
-        for l in (ls, ls2, ls3):
+        for l in (ls, ls2, ls4, ls3):
             self.radar.attachNewNode(l.create())
