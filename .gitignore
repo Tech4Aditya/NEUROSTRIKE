@@ -9,5 +9,5 @@ android/app/build/
 android/local.properties
 *.pt
 !server/models/.gitkeep
-server/sounds/
+
 server/highscores.json
