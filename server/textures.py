@@ -213,3 +213,43 @@ def beam():
         rgba[..., 3] = a
         _cache["beam"] = _tex_rgba("beam", rgba, clamp=True)
     return _cache["beam"]
+
+
+def camo():
+    """Multicam-style fatigue pattern (tileable). Parts are tinted dark via vertex colour for vests, boots, rifle."""
+    if "camo" not in _cache:
+        n = 256
+        a, b = _fractal(n, 2.3, 80), _fractal(n, 2.0, 81)
+        idx = (a > 0.52).astype(int) + 2 * (b > 0.55).astype(int)
+        pal = np.array([[0.46, 0.41, 0.29], [0.31, 0.35, 0.21], [0.26, 0.19, 0.12], [0.16, 0.20, 0.13]])
+        grain = 0.88 + 0.24 * _fractal(n, 0.8, 82)
+        _cache["camo"] = _tex("camo", pal[idx] * grain[..., None])
+    return _cache["camo"]
+
+
+def puff():
+    """Soft grey dust/smoke sprite."""
+    if "puff" not in _cache:
+        n = 64
+        y, x = np.mgrid[-1:1:n * 1j, -1:1:n * 1j]
+        r = np.clip(1 - np.hypot(x, y), 0, 1)
+        noise = 0.65 + 0.7 * _fractal(n, 2.0, 83)
+        rgba = np.zeros((n, n, 4)); rgba[..., :3] = (0.80, 0.77, 0.70)
+        rgba[..., 3] = np.clip(r ** 1.3 * noise * 0.75, 0, 1)
+        _cache["puff"] = _tex_rgba("puff", rgba, clamp=True)
+    return _cache["puff"]
+
+
+def hole():
+    """Bullet hole: dark centre, ragged edge, faint cracks."""
+    if "hole" not in _cache:
+        n = 64
+        y, x = np.mgrid[-1:1:n * 1j, -1:1:n * 1j]
+        r, th = np.hypot(x, y), np.arctan2(y, x)
+        ragged = 0.30 + 0.10 * np.sin(th * 7 + 1.3) + 0.06 * np.sin(th * 13)
+        core = np.clip((ragged - r) / 0.08, 0, 1)
+        cracks = (np.abs(np.sin(th * 5)) ** 40) * np.exp(-r * 3.5) * 0.5
+        rgba = np.zeros((n, n, 4)); rgba[..., :3] = (0.03, 0.03, 0.03)
+        rgba[..., 3] = np.clip(core * 0.95 + cracks, 0, 1) * np.clip(1.1 - r, 0, 1)
+        _cache["hole"] = _tex_rgba("hole", rgba, clamp=True)
+    return _cache["hole"]

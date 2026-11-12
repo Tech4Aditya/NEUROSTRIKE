@@ -70,6 +70,31 @@ Both presets share: tileable procedural textures (asphalt + grime, concrete, con
 
 > **Enemy outline vs YOLO:** `ENEMY_HIGHLIGHT` draws the red outline. The colour fallback relies on it. If you later train YOLO and want outline-free enemies, set it to `False` **and re-record the dataset**.
 
+## 🪖 Soldiers & game feel
+
+All assets are generated in code — **no third-party models, so no licence or attribution to worry about.**
+
+- **Soldier:** camo fatigues (procedural multicam texture), plate carrier with pouches, belt, backpack, helmet, goggles, rifle, knee pads, boots. Legs swing while walking; the whole soldier is ~8 draw calls.
+- **Hit feedback:** the target flashes white and rocks back when shot, a dust puff + hit marker + tick sound fire, and a headshot pops a banner.
+- **Death:** the soldier stops being a target (outline off, footsteps off), falls backwards over half a second with a body-fall thud, lies there, then fades out. Kill streak banners stack on top.
+- **World impact:** every shot that lands on the world leaves a dust puff and a **bullet hole** (last 40 kept, fade after 14 s).
+- **Damage:** the screen shakes when you're hit (blue flash for armor, red for health).
+
+**Why not downloaded 3D characters?** I tried: the free rigged characters I could fetch were a civilian in a suit and sci-fi blasters, and rigged (skinned) models rendered garbled in my test renderer, so I couldn't verify them. I won't ship what I can't see. If you find a model you like, test it on your laptop first (e.g. drop the `.glb` into Blender or a glTF viewer), and send me a screenshot of it running in-game.
+
+## 🛡 Armor plates (Warzone style)
+
+- Plates lie on the map with a cyan light beam, a ground ring and a slowly spinning steel plate. Two spawn near you at the start of a round, a new one every ~14 s (max 3), and killed enemies drop one 30% of the time. They show as cyan squares on the PC radar.
+- **Just walk over one** — it applies itself. Both gloved hands carry the plate up, hold it, and push it down into the vest while the rifle drops away (1.8 s, you can still move but can't shoot or reload). Sounds: pickup chime, velcro rip, plate slide, clack, lock thump, shimmer.
+- Each plate = **+10 armor, no health**. Max 3 plates (30). Armor soaks damage first (blue flash + metal ping, crunch when it breaks); only the overflow hurts your HP. At full armor, plates stay on the ground.
+- HUD: three plate segments under the HP bar. The phone app doesn't show armor (it ignores the new `armor` field) — no app update needed.
+- Tune everything in `config.py` (`PLATE_*`). The attract-mode bot grabs plates too.
+
+## 📡 Hardware radar (optional)
+
+Every enemy and armor plate can also be streamed to a **physical LED-ring radar** built from an ESP32 (about one evening, a few parts).
+Run `python main.py --hw-radar`; wiring, parts and firmware are in [`hardware/`](hardware/README.md). Test the PC side without any hardware: `python tools/hw_radar_sim.py`.
+
 ## 🎪 Exhibition mode
 
 | Feature | What it does |
@@ -168,6 +193,7 @@ NeuroStrike/
 │  ├─ game.py        Panda3D game loop      ├─ net.py      WebSocket server (own thread)
 │  ├─ world.py       arena, collision, rays ├─ config.py   every tunable in one place
 │  └─ tools/         train.py · test_client.py
+├─ hardware/         ESP32 LED-ring radar (firmware + build guide)
 └─ android/          Kotlin + Compose app (Ui · NetClient · GyroAim · InputController)
 ```
 

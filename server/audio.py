@@ -171,12 +171,20 @@ def armor_break():
     return _norm(_mix(0.8 * crunch + thump, _tick(2000, 0.05)), 0.95)
 
 
+def body_fall():
+    t = _t(0.55)
+    thump = np.sin(2 * np.pi * 58 * t) * np.exp(-t * 16) + 0.5 * _lp(_noise(len(t), 90), 300) * np.exp(-t * 22)
+    rng = np.random.default_rng(91)
+    rattle = _hp(_noise(len(t), 92), 1800) * np.exp(-t * 9) * (rng.random(len(t)) > 0.6) * 0.35
+    return _norm(thump + rattle, 0.85)
+
+
 BUILD = {"shot": gunshot, "reload": reload_full, "reload_tac": reload_tac, "click": click, "hit": hit,
          "kill": kill, "hurt": hurt, "step": step, "enemy_steps": enemy_steps, "whoosh": whoosh,
          "ambience": ambience, "plate_pickup": plate_pickup, "plate_apply": plate_apply,
-         "armor_hit": armor_hit, "armor_break": armor_break}
+         "armor_hit": armor_hit, "body_fall": body_fall, "armor_break": armor_break}
 POOL = {"shot": 4, "reload": 1, "reload_tac": 1, "click": 2, "hit": 3, "kill": 2, "hurt": 2,
-        "step": 3, "whoosh": 1, "ambience": 1, "plate_pickup": 2, "plate_apply": 1, "armor_hit": 3, "armor_break": 1}
+        "step": 3, "whoosh": 1, "ambience": 1, "plate_pickup": 2, "plate_apply": 1, "armor_hit": 3, "body_fall": 2, "armor_break": 1}
 
 
 def _write(path, x):

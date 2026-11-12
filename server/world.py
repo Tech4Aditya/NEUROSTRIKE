@@ -51,11 +51,8 @@ CAR_COLORS = [(0.28, 0.30, 0.33, 1), (0.28, 0.32, 0.22, 1), (0.12, 0.16, 0.26, 1
 DRUM_COLORS = [(0.35, 0.50, 0.75, 1), (0.40, 0.55, 0.38, 1), (0.55, 0.55, 0.58, 1)]
 
 
-def make_box(hx, hy, hz, tile=(1.0, 1.0)):
-    """Box centred on the origin with world-scaled UVs (one texture tile = `tile` metres)."""
-    vd = GeomVertexData("box", GeomVertexFormat.getV3n3t2(), Geom.UHStatic)
-    vw, nw, tw = (GeomVertexWriter(vd, n) for n in ("vertex", "normal", "texcoord"))
-    faces = [
+def _box_faces(hx, hy, hz):
+    return [
         ((1, 0, 0), [(hx, -hy, -hz), (hx, hy, -hz), (hx, hy, hz), (hx, -hy, hz)]),
         ((-1, 0, 0), [(-hx, hy, -hz), (-hx, -hy, -hz), (-hx, -hy, hz), (-hx, hy, hz)]),
         ((0, 1, 0), [(hx, hy, -hz), (-hx, hy, -hz), (-hx, hy, hz), (hx, hy, hz)]),
@@ -63,28 +60,47 @@ def make_box(hx, hy, hz, tile=(1.0, 1.0)):
         ((0, 0, 1), [(-hx, -hy, hz), (hx, -hy, hz), (hx, hy, hz), (-hx, hy, hz)]),
         ((0, 0, -1), [(hx, -hy, -hz), (-hx, -hy, -hz), (-hx, hy, -hz), (hx, hy, -hz)]),
     ]
+
+
+def _build_boxes(specs, tile, two_sided):
+    """specs = [((px,py,pz), (hx,hy,hz)), ...] -> ONE geom containing all boxes."""
+    vd = GeomVertexData("box", GeomVertexFormat.getV3n3t2(), Geom.UHStatic)
+    vw, nw, tw = (GeomVertexWriter(vd, n) for n in ("vertex", "normal", "texcoord"))
     tris = GeomTriangles(Geom.UHStatic)
-    for n, verts in faces:
-        base = vw.getWriteRow()
-        for v in verts:
-            vw.addData3(*v)
-            nw.addData3(*n)
-            if n[0]:
-                u, w = v[1], v[2]
-            elif n[1]:
-                u, w = v[0], v[2]
-            else:
-                u, w = v[0], v[1]
-            tw.addData2(u / tile[0], w / tile[1])
-        tris.addVertices(base, base + 1, base + 2)
-        tris.addVertices(base, base + 2, base + 3)
+    for (px, py, pz), (hx, hy, hz) in specs:
+        for n, verts in _box_faces(hx, hy, hz):
+            base = vw.getWriteRow()
+            for v in verts:
+                vw.addData3(v[0] + px, v[1] + py, v[2] + pz)
+                nw.addData3(*n)
+                if n[0]:
+                    u, w_ = v[1], v[2]
+                elif n[1]:
+                    u, w_ = v[0], v[2]
+                else:
+                    u, w_ = v[0], v[1]
+                tw.addData2(u / tile[0], w_ / tile[1])
+            tris.addVertices(base, base + 1, base + 2)
+            tris.addVertices(base, base + 2, base + 3)
     geom = Geom(vd)
     geom.addPrimitive(tris)
     node = GeomNode("box")
     node.addGeom(geom)
     np_ = NodePath(node)
-    np_.setTwoSided(True)
+    if two_sided:
+        np_.setTwoSided(True)
     return np_
+
+
+def make_box(hx, hy, hz, tile=(1.0, 1.0)):
+    """Box centred on the origin with world-scaled UVs (one texture tile = `tile` metres)."""
+    return _build_boxes([((0, 0, 0), (hx, hy, hz))], tile, True)
+
+
+def make_boxes(specs):
+    """Many boxes merged into ONE single-sided mesh (used for the enemy outline hull, which needs
+    back-face rendering; merging with flattenStrong() would break face culling)."""
+    return _build_boxes(specs, (1.0, 1.0), False)
 
 
 def outline(hx, hy, hz, color, thickness=2.0):

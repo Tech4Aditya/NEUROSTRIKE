@@ -17,12 +17,13 @@ from panda3d.core import (AmbientLight, AntialiasAttrib, BitMask32, CardMaker, C
 import config as C
 import textures as T
 from audio import Sfx
+from hwradar import HwRadar
 from shadows import make_blob
 from show import Show
 from weapon import Weapon
 from net import PhoneLink, lan_ip
 from vision import VisionWorker, build_detector
-from world import (HAZE, SUN_DIR, build_arena, build_sky, make_box, push_out, ray_sphere, ray_world)
+from world import (HAZE, SUN_DIR, build_arena, build_sky, make_box, make_boxes, push_out, ray_sphere, ray_world)
 
 loadPrcFileData("", f"window-title NeuroStrike\nwin-size {C.WIN_W} {C.WIN_H}\nsync-video {1 if C.VSYNC else 0}\nfullscreen {1 if C.FULLSCREEN else 0}\nframebuffer-multisample {1 if C.MSAA else 0}\nmultisamples {C.MSAA}\n")
 
@@ -36,45 +37,54 @@ MAIN_MASK = BitMask32.bit(1)
 
 
 class Enemy:
-    """Soldier built from boxes, merged into a handful of draw calls (important on integrated GPUs):
-    one body mesh, two swinging legs, three red outline hulls, one blob shadow."""
+    """Camo-clad soldier: textured boxes with gear (plate carrier, pouches, backpack, helmet, goggles,
+    rifle, knee pads), merged into a few draw calls. Flinches when hit, falls on death."""
 
-    UPPER = [((0, 0, 1.18), (0.27, 0.16, 0.30), (0.22, 0.26, 0.17, 1)),          # torso
-             ((0, 0.10, 1.22), (0.22, 0.05, 0.22), (0.13, 0.14, 0.12, 1)),       # plate carrier
-             ((-0.37, 0.04, 1.20), (0.07, 0.07, 0.26), (0.22, 0.26, 0.17, 1)),   # arms
-             ((0.37, 0.04, 1.20), (0.07, 0.07, 0.26), (0.22, 0.26, 0.17, 1)),
-             ((0, 0, 1.62), (0.10, 0.11, 0.12), (0.55, 0.40, 0.32, 1)),          # head
-             ((0, 0, 1.73), (0.13, 0.14, 0.07), (0.20, 0.23, 0.16, 1)),          # helmet
-             ((0, 0.11, 1.64), (0.10, 0.02, 0.035), (0.07, 0.07, 0.07, 1)),      # goggles
-             ((0.18, 0.30, 1.20), (0.03, 0.36, 0.045), (0.07, 0.07, 0.07, 1))]   # rifle
-    LEG = [((0, 0, -0.37), (0.10, 0.11, 0.34), (0.22, 0.26, 0.17, 1)),
-           ((0, 0.05, -0.80), (0.09, 0.15, 0.08), (0.07, 0.07, 0.07, 1))]
+    # (position, half-dims, tint, camo-textured?)   -- dark tints turn the camo into vests / boots / rifle
+    UPPER = [((0, 0, 1.18), (0.27, 0.16, 0.30), (1.0, 1.0, 1.0), True),              # torso
+             ((0, 0.10, 1.22), (0.22, 0.05, 0.22), (0.25, 0.27, 0.22), True),        # plate carrier
+             ((-0.14, 0.15, 1.12), (0.05, 0.03, 0.07), (0.22, 0.24, 0.20), True),    # mag pouches
+             ((0.0, 0.15, 1.12), (0.05, 0.03, 0.07), (0.22, 0.24, 0.20), True),
+             ((0.14, 0.15, 1.12), (0.05, 0.03, 0.07), (0.22, 0.24, 0.20), True),
+             ((-0.37, 0.04, 1.20), (0.07, 0.07, 0.26), (1.0, 1.0, 1.0), True),       # arms
+             ((0.37, 0.04, 1.20), (0.07, 0.07, 0.26), (1.0, 1.0, 1.0), True),
+             ((0, -0.17, 1.20), (0.20, 0.09, 0.26), (0.85, 0.80, 0.65), True),       # backpack
+             ((0, 0.0, 0.95), (0.28, 0.17, 0.05), (0.20, 0.20, 0.18), True),         # belt
+             ((0, 0, 1.62), (0.10, 0.11, 0.12), (0.55, 0.40, 0.32), False),          # head
+             ((0, 0, 1.73), (0.13, 0.14, 0.07), (0.75, 0.80, 0.62), True),           # helmet
+             ((0, 0.11, 1.64), (0.10, 0.02, 0.035), (0.05, 0.05, 0.05), False),      # goggles
+             ((0.18, 0.30, 1.20), (0.03, 0.36, 0.045), (0.12, 0.12, 0.12), True)]    # rifle
+    LEG = [((0, 0, -0.37), (0.10, 0.11, 0.34), (1.0, 1.0, 1.0), True),
+           ((0, 0.10, -0.40), (0.09, 0.03, 0.07), (0.20, 0.20, 0.18), True),         # knee pad
+           ((0, 0.05, -0.80), (0.09, 0.15, 0.08), (0.10, 0.10, 0.10), True)]         # boot
 
     def __init__(self, game, x, y):
         self.x, self.y = x, y
         self.hp = C.ENEMY_HP
-        self.flash = 0.0
+        self.flash = self.flinch = 0.0
+        self.dead, self.dead_t = False, 0.0
         self.game, self.snd = game, None
         self.phase = random.random() * 6.28
         self.root = game.render.attachNewNode("enemy")
         self.hulls = []
 
-        def build(parent, parts, origin=(0, 0, 0), color=None):
-            for pos, dims, col in parts:
-                b = make_box(*dims); b.reparentTo(parent)
+        def build(parent, parts, origin=(0, 0, 0), hull_color=None):
+            for pos, dims, tint, tex in parts:
+                b = make_box(*dims, tile=(0.8, 0.8)); b.reparentTo(parent)
                 b.setPos(pos[0] - origin[0], pos[1] - origin[1], pos[2] - origin[2])
-                if color is None:
-                    b.setColor(*col)
+                if hull_color is None:
+                    b.setColor(tint[0], tint[1], tint[2], 1)
+                    if tex:
+                        b.setTexture(T.camo())
             parent.flattenStrong()
-            if color is not None:
-                parent.setColor(*color)
+            if hull_color is not None:
+                parent.setColor(*hull_color)
 
         def hull(parent, center, half, parts):
-            h = parent.attachNewNode("hull"); h.setPos(*center)
-            build(h, parts, center, HOSTILE)
-            # priority 1 beats the per-box two-sided state, so only the BACK faces draw -> outline ring
-            h.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullCounterClockwise), 1)
-            h.setLightOff(); h.setFogOff()
+            h = make_boxes([((p[0] - center[0], p[1] - center[1], p[2] - center[2]), d) for p, d, _, _ in parts])
+            h.reparentTo(parent); h.setPos(*center)
+            h.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullCounterClockwise))   # back faces only -> outline ring
+            h.setLightOff(); h.setFogOff(); h.setColor(*HOSTILE)
             self.hulls.append((h, half))
 
         self.upper = self.root.attachNewNode("upper")
@@ -103,16 +113,15 @@ class Enemy:
             self.x, self.y = push_out(self.x, self.y, 0.5)
         self.root.setPos(self.x, self.y, 0)
         self.root.setH(math.degrees(math.atan2(-dx, dy)))
+        self.flinch = max(0.0, self.flinch - dt)
+        self.root.setP(-11.0 * self.flinch / 0.18)           # rocks back when shot
         swing = 28 * math.sin(t * 7 + self.phase) if moving else 0.0
         for piv, s_ in self.legs:
             piv.setP(swing * s_)
         pad = 0.045 + 0.010 * d            # outline grows with distance so it stays visible
         for h, half in self.hulls:
             h.setScale(1 + pad / half[0], 1 + pad / half[1], 1 + pad / half[2])
-        if self.shadow is not None:
-            self.shadow.setPos(self.x + self.sdir[0] * 0.9, self.y + self.sdir[1] * 0.9, 0)
-            self.shadow.setH(math.degrees(math.atan2(-self.sdir[0], self.sdir[1])))
-            self.shadow.setScale(0.9, 2.0, 1)
+        self._shadow()
         if self.flash > 0:
             self.flash -= dt
             k = 2.8 if self.flash > 0 else 1.0
@@ -120,6 +129,36 @@ class Enemy:
             for piv, _ in self.legs:
                 piv.setColorScale(k, k, k, 1)
         return d
+
+    def _shadow(self):
+        if self.shadow is not None:
+            self.shadow.setPos(self.x + self.sdir[0] * 0.9, self.y + self.sdir[1] * 0.9, 0)
+            self.shadow.setH(math.degrees(math.atan2(-self.sdir[0], self.sdir[1])))
+            self.shadow.setScale(0.9, 2.0, 1)
+
+    def kill(self):
+        """Stop being a target: outline off, footsteps off; the body keeps animating until it fades."""
+        self.dead, self.dead_t = True, 0.0
+        for h, _ in self.hulls:
+            h.hide()
+        if self.snd is not None:
+            self.game.sfx.release_steps(self.snd); self.snd = None
+        self.upper.setColorScale(1, 1, 1, 1)
+        for piv, _ in self.legs:
+            piv.setColorScale(1, 1, 1, 1); piv.setP(0)
+
+    def update_dead(self, dt):
+        """Falls backwards (0.55 s, ease-out), lies there, then fades. Returns False when finished."""
+        self.dead_t += dt
+        u = min(1.0, self.dead_t / 0.55)
+        self.root.setP(88.0 * (1 - (1 - u) ** 3))
+        if self.dead_t > 1.8:
+            a = max(0.0, 1.0 - (self.dead_t - 1.8) / 0.8)
+            self.root.setTransparency(TransparencyAttrib.MAlpha); self.root.setColorScale(1, 1, 1, a)
+            if self.shadow is not None:
+                self.shadow.setColorScale(1, 1, 1, a)
+        self._shadow()
+        return self.dead_t < 2.6
 
     def destroy(self):
         if self.snd is not None:
@@ -192,6 +231,7 @@ class NeuroStrike(ShowBase):
         self.cap_pending, self.cap_meta, self.q_stage, self.q_t, self.hud_acc = False, None, 0, 0.0, 1.0
         self.godmode, self.spawn_enabled = False, True
         self.armor, self.armor_flash, self.plates = 0.0, 0.0, []
+        self.dying, self.puffs, self.decals, self.shake = [], [], [], 0.0
         self.plating, self.plating_t, self.plate_spawn_t = False, 0.0, 4.0
         self.since_shot, self.recoil_acc, self.kick = 9.0, 0.0, 0.0
 
@@ -208,6 +248,7 @@ class NeuroStrike(ShowBase):
         self.vision.start()
         self.ip = lan_ip()
         self.show = Show(self)
+        self.hw = HwRadar() if C.HW_RADAR else None
         print("\n  ⚡ NEUROSTRIKE online")
         print(f"  Phone → enter  {self.ip}   (ws://{self.ip}:{C.WS_PORT})\n")
         self.taskMgr.add(self.update, "update")
@@ -411,7 +452,9 @@ class NeuroStrike(ShowBase):
         roll = (0.0, 0.6, 1.2)[lvl] * math.sin(self.walk_t * 0.5) if self.moving else 0.0
         self.kick = max(0.0, self.kick - dt * 9.0)
         self.camera.setPos(self.px, self.py, 1.7 + bob)
-        self.camera.setHpr(self.h, self.p + self.kick * 1.2, roll)
+        sh = self.shake; self.shake = max(0.0, sh - dt)
+        self.camera.setHpr(self.h + random.uniform(-1, 1) * sh * 2.5, self.p + self.kick * 1.2 + random.uniform(-1, 1) * sh * 2.5,
+                           roll + random.uniform(-1, 1) * sh * 5.0)
         self.sky.setPos(self.px, self.py, 0)
 
         self.weapon.update(dt, dict(
@@ -441,8 +484,11 @@ class NeuroStrike(ShowBase):
         self.update_enemies(dt, now)
         self.update_plates(dt)
         self.update_fx(dt)
+        self.update_juice(dt)
         self.vision_tick(dt)
         self.publish(dt)
+        if self.hw:
+            self.hw.tick(dt, self)
         self.update_hud(dt)
         self.auto_quality(dt)
         return task.cont
@@ -533,9 +579,47 @@ class NeuroStrike(ShowBase):
             wp = WindowProperties(); wp.setSize(w, h); self.win.requestProperties(wp)
             print(f"[gfx] {fps:.0f} fps -> window {w}x{h}  (also try: python main.py --renderer dx9)")
 
+    def _sprite(self, tex, pos):
+        cm = CardMaker("s"); cm.setFrame(-0.5, 0.5, -0.5, 0.5)
+        c = self.render.attachNewNode(cm.generate()); c.setPos(pos); c.setBillboardPointEye()
+        c.setTexture(tex); c.setLightOff(); c.setTwoSided(True); c.setDepthWrite(False)
+        c.setTransparency(TransparencyAttrib.MAlpha); c.setBin("transparent", 8)
+        return c
+
+    def impact(self, pos, decal):
+        """Dust puffs on every hit, plus a lasting bullet hole when the shot lands on the world."""
+        for _ in range(2):
+            c = self._sprite(T.puff(), pos + Vec3(random.uniform(-.05, .05), random.uniform(-.05, .05), random.uniform(0, .08)))
+            self.puffs.append([c, 0.0, random.uniform(0.35, 0.55), random.uniform(0.12, 0.20)])
+        if decal:
+            c = self._sprite(T.hole(), pos); c.setScale(0.10)
+            self.decals.append([c, 0.0])
+            if len(self.decals) > 40:
+                self.decals.pop(0)[0].removeNode()
+
+    def update_juice(self, dt):
+        for e in self.dying[:]:
+            if not e.update_dead(dt):
+                e.destroy(); self.dying.remove(e)
+        for p in self.puffs[:]:
+            p[1] += dt
+            u = p[1] / p[2]
+            if u >= 1.0:
+                p[0].removeNode(); self.puffs.remove(p); continue
+            p[0].setScale(p[3] + 0.45 * u); p[0].setColorScale(1, 1, 1, (1 - u) * 0.9)
+            p[0].setZ(p[0].getZ() + 0.35 * dt)
+        for d_ in self.decals[:]:
+            d_[1] += dt
+            if d_[1] > 14.0:
+                a = max(0.0, 1.0 - (d_[1] - 14.0) / 3.0)
+                d_[0].setColorScale(1, 1, 1, a)
+                if a <= 0:
+                    d_[0].removeNode(); self.decals.remove(d_)
+
     def take_damage(self, dmg):
         """Armor soaks damage first; only the overflow reaches health."""
         self.hurt_count += 1
+        self.shake = 0.3
         if self.armor > 0:
             soak = min(self.armor, dmg)
             self.armor -= soak; dmg -= soak
@@ -609,6 +693,8 @@ class NeuroStrike(ShowBase):
         self.mag, self.reloading, self.sprint, self.tac_cd = C.MAG_SIZE, False, 0, 0.0
         self.t_center.setText("")
         self.armor, self.plating, self.plate_spawn_t = 0.0, False, C.PLATE_SPAWN_INTERVAL
+        for e in self.dying: e.destroy()
+        self.dying.clear()
         for p in self.plates: p.destroy()
         self.plates.clear()
         for _ in range(2):                                  # two plates up front so players see the mechanic
@@ -639,6 +725,7 @@ class NeuroStrike(ShowBase):
         tracer = self.render.attachNewNode(ls.create()); tracer.setLightOff(); tracer.setFogOff()
         self.taskMgr.doMethodLater(0.05, lambda t, n=tracer: n.removeNode(), "tracer")
         self.burst(end, 3, (0.75, 0.70, 0.60, 1))
+        self.impact(end - d * 0.015 if hit is None else end, decal=hit is None and best < 79.0)
         self.kick = 1.0
         kp = random.uniform(0.45, 0.65)                  # real recoil: climbs the aim, partly recovers
         self.p += kp
@@ -647,7 +734,7 @@ class NeuroStrike(ShowBase):
         self.since_shot = 0.0
         if hit:
             hit.hp -= 3 if head else 1
-            hit.flash = 0.08
+            hit.flash = 0.08; hit.flinch = 0.18
             self.hit_t = 0.12
             self.hitmarker.setColorScale(1, 1, 1, 1); self.hitmarker.show()
             self.sfx.play("hit", 0.8)
@@ -655,8 +742,9 @@ class NeuroStrike(ShowBase):
             if hit.hp <= 0:
                 self.hitmarker.setColorScale(1, 0.2, 0.2, 1)
                 self.sfx.play("kill", 0.9)
-                self.burst(Point3(hit.x, hit.y, 1.0), 12, (0.80, 0.76, 0.66, 1))
-                hit.destroy(); self.enemies.remove(hit)
+                self.burst(Point3(hit.x, hit.y, 1.0), 6, (0.80, 0.76, 0.66, 1))
+                hit.kill(); self.enemies.remove(hit); self.dying.append(hit)
+                self.taskMgr.doMethodLater(0.40, lambda t: self.sfx.play("body_fall", 0.8) and None, "fall")
                 self.score += 150 if head else 100
                 if random.random() < C.PLATE_DROP_CHANCE and len(self.plates) < C.PLATES_ON_MAP + 2:
                     self.plates.append(Plate(self, *push_out(hit.x, hit.y, 0.6)))

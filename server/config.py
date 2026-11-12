@@ -60,7 +60,7 @@ FULLSCREEN = False                # True = start fullscreen (or press F11 in gam
 # --- exhibition -------------------------------------------------------------
 VSYNC = False                     # False = no vsync (avoids the 60->30 fps quantisation on slow GPUs)
 ATTRACT = True                    # idle screen: AI bot plays by itself until someone picks up the phone
-ROUND_TIME = 200                   # seconds per visitor round
+ROUND_TIME = 90                   # seconds per visitor round
 RESULTS_TIME = 10                 # seconds the results screen stays up
 SHOW_AI_VIEW = True               # picture-in-picture of what YOLO sees (V toggles)
 
@@ -79,6 +79,12 @@ def apply_quality(name):
 
 
 apply_quality(QUALITY)
+
+# --- hardware radar bridge (ESP32 LED ring etc., see /hardware) -------------
+HW_RADAR = False                  # --hw-radar on the command line
+HW_RADAR_HOST = "auto"            # "auto" = Wi-Fi broadcast (x.y.z.255), or the ESP32's IP
+HW_RADAR_PORT = 4210
+HW_RADAR_SERIAL = ""              # e.g. "COM5" to also send over USB (needs pyserial)
 
 # --- armor plates (Warzone style) -------------------------------------------
 PLATE_ARMOR = 10                  # armor points one plate adds (armor only, never health)

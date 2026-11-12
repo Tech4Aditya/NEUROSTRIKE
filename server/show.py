@@ -133,9 +133,9 @@ class Show:
         acc = round(100 * st["hits"] / max(1, st["shots"]))
         self.final = dict(score=g.score, kills=st["kills"], heads=st["heads"], acc=acc, date=time.strftime("%d %b %H:%M"))
         rank = self._add_score(self.final)
-        for e in g.enemies:
+        for e in g.enemies + g.dying:
             e.destroy()
-        g.enemies.clear(); g.contacts.clear()
+        g.enemies.clear(); g.dying.clear(); g.contacts.clear()
         self.mode, self.results_t = "results", float(C.RESULTS_TIME)
         self.t_res_title.setText(reason)
         self.t_res.setText(f"SCORE  {g.score}\nKILLS  {st['kills']}     HEADSHOTS  {st['heads']}\nACCURACY  {acc}%")

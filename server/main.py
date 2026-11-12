@@ -4,6 +4,7 @@
     python main.py --quality high       # real shadows + bloom (needs a GPU)
     python main.py --res 960x540        # smaller window = faster
     python main.py --fullscreen --res 1600x900   # fullscreen (F11 toggles in game)
+    python main.py --hw-radar            # also drive the physical radar (see /hardware)
     python main.py --renderer dx9       # try DirectX instead of OpenGL (helps on some Windows-on-ARM drivers)
 """
 import argparse
@@ -19,6 +20,9 @@ def main():
     ap.add_argument("--res", default=None, help="window size, 16:9, e.g. 960x540")
     ap.add_argument("--renderer", choices=["auto", "gl", "dx9", "software"], default="auto")
     ap.add_argument("--fullscreen", action="store_true", help="start fullscreen (F11 toggles in game)")
+    ap.add_argument("--hw-radar", nargs="?", const="auto", default=None, metavar="HOST",
+                    help="stream radar to hardware: no value = Wi-Fi broadcast, or give the ESP32 IP")
+    ap.add_argument("--hw-serial", default="", metavar="PORT", help="also/only send over USB serial, e.g. COM5")
     ap.add_argument("--no-attract", action="store_true", help="skip the idle demo screen (free play, no timer)")
     a = ap.parse_args()
 
@@ -29,6 +33,10 @@ def main():
         C.FULLSCREEN = True
         if not a.res:
             C.WIN_W, C.WIN_H = 1920, 1080          # real fullscreen mode; override with --res
+    if a.hw_radar or a.hw_serial:
+        C.HW_RADAR = True
+        C.HW_RADAR_HOST = a.hw_radar or ("127.0.0.1" if a.hw_serial else "auto")
+        C.HW_RADAR_SERIAL = a.hw_serial
     if a.no_attract:
         C.ATTRACT = False
 
